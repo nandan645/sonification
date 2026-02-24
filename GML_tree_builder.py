@@ -9,6 +9,7 @@ import logging
 import sys
 import time
 from kivy.core.image import Image
+from kivy.core.window import Window
 
 """
 Class used for creating GML trees from still images and from video frames
@@ -49,7 +50,8 @@ class GML_tree_builder():
     #Video camera capture parameters
     video_x_res=640
     video_y_res=480
-    image_scale_video=0.2 #Smaller is larger
+    image_scale_video=1.0
+    preferred_camera_resolutions=[(7680, 4320),(3840, 2160),(2560, 1440),(1920, 1080),(1600, 1200),(1280, 1024),(1280, 960),(1280, 720),(1024, 768),(800, 600),(640, 480),]
     camera_device_number=0
     video_on=False
     mirror_mode=False
@@ -119,14 +121,40 @@ class GML_tree_builder():
                 cv2.VideoWriter_fourcc(*'MJPG')
             )
 
-            # Set resolution AFTER opening
-            self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            # Set max supported resolution AFTER opening
+            self._set_max_camera_resolution()
 
             # Ensure proper color conversion
             self.video_capture.set(cv2.CAP_PROP_CONVERT_RGB, 1)
 
             self.display_ratio_lists = False
+
+    def _set_max_camera_resolution(self):
+        if self.video_capture is None or not self.video_capture.isOpened():
+            return
+
+        best_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH) or self.video_x_res)
+        best_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or self.video_y_res)
+
+        for target_width, target_height in self.preferred_camera_resolutions:
+            self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
+            self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
+
+            actual_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            actual_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+            if actual_width >= target_width and actual_height >= target_height:
+                best_width = actual_width
+                best_height = actual_height
+                break
+
+            if (actual_width * actual_height) > (best_width * best_height):
+                best_width = actual_width
+                best_height = actual_height
+
+        self.video_x_res = best_width
+        self.video_y_res = best_height
+        logging.info(f"[Tree Builder] Camera resolution selected: {self.video_x_res}x{self.video_y_res}")
     def __del__(self):
         # body of destructor
         if(self.video_on==True):
@@ -724,12 +752,26 @@ class GML_tree_builder():
 
 
     # Load a video capture and draw to the kivy screen
+    def _video_fit_scale(self, frame_width, frame_height):
+        available_width = max(1, Window.width - self.photo_pos[0] - 10)
+        available_height = max(1, Window.height - self.photo_pos[1] - 10)
+
+        scale_x = frame_width / available_width
+        scale_y = frame_height / available_height
+        fit_scale = max(scale_x, scale_y)
+
+        if fit_scale <= 0:
+            fit_scale = 1.0
+
+        # Keep user scale if it already makes image smaller than fit target.
+        return max(self.image_scale_video, fit_scale)
+
     def draw_video(self):
         if(self.img_key_points is None):
             print("No key points")
             return
         #print("draw_video")
-        self.image_scale=self.image_scale_video
+        self.image_scale=self._video_fit_scale(self.img_key_points.shape[1], self.img_key_points.shape[0])
 
         self.update_frame_count+=1
         if(self.update_frame_count>self.video_underlay_update_rate):

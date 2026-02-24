@@ -250,7 +250,7 @@ def draw_3d_plot():
         plt.style.use('dark_background')
         plt.close('all')
         fig1 = plt.figure(1)
-        fig1.set_size_inches(7,10.2)
+        # fig1.set_size_inches(7,10.2) # Set the figure size to 7 inches wide and 10.2 inches tall
     plt.figure(1).clear()
     ax1 = fig1.add_subplot(311, projection='3d')
     ax2 = fig1.add_subplot(312)
