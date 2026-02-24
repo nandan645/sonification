@@ -4,12 +4,14 @@ from GML import *
 from GML_analysis import *
 import numpy as np
 import cv2
-import pyautogui
 import logging
 import sys
 import time
 from kivy.core.image import Image
 from kivy.core.window import Window
+import ctypes
+import win32gui
+import win32ui
 
 """
 Class used for creating GML trees from still images and from video frames
@@ -35,8 +37,6 @@ class GML_tree_builder():
     building_tree=False
 
 
-    video_capture=None
-    window_video_capture_handle =None
     img_key_points=None
     update_frame_count=0
 
@@ -47,12 +47,8 @@ class GML_tree_builder():
     "Fibonacci","Pythagorean5","Pythagorean6", "Vedic", "Raga",
     "Dorian","Constants"]
 
-    #Video camera capture parameters
-    video_x_res=640
-    video_y_res=480
+    #Window capture parameters
     image_scale_video=1.0
-    preferred_camera_resolutions=[(7680, 4320),(3840, 2160),(2560, 1440),(1920, 1080),(1600, 1200),(1280, 1024),(1280, 960),(1280, 720),(1024, 768),(800, 600),(640, 480),]
-    camera_device_number=0
     video_on=False
     mirror_mode=False
     video_frame_counter=0
@@ -103,64 +99,74 @@ class GML_tree_builder():
 
         self.video_on = video_on
         self.button1 = button1
+        if self.video_on:
+            logging.info("[Tree Builder] Window capture mode enabled")
 
-        if self.video_on == True and self.window_video_capture_handle is None:
-            logging.info("[Tree Builder] Enabling camera capture (MSMF + MJPG)")
-
-            # Use MSMF backend (since DSHOW fails on your camera)
-            self.video_capture = cv2.VideoCapture(self.camera_device_number, cv2.CAP_MSMF)
-
-            if not self.video_capture.isOpened():
-                logging.error("[Tree Builder] Camera failed to open")
-            else:
-                logging.info("[Tree Builder] Camera opened successfully")
-
-            # Force MJPEG (required for many HKVISION cameras)
-            self.video_capture.set(
-                cv2.CAP_PROP_FOURCC,
-                cv2.VideoWriter_fourcc(*'MJPG')
-            )
-
-            # Set max supported resolution AFTER opening
-            self._set_max_camera_resolution()
-
-            # Ensure proper color conversion
-            self.video_capture.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+            ctypes.windll.user32.SetProcessDPIAware()
+            self.hwnd = self.select_window_interactively()
 
             self.display_ratio_lists = False
 
-    def _set_max_camera_resolution(self):
-        if self.video_capture is None or not self.video_capture.isOpened():
-            return
+    def select_window_interactively(self):
+        windows = []
 
-        best_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH) or self.video_x_res)
-        best_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or self.video_y_res)
+        def callback(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                if title.strip():
+                    windows.append((hwnd, title))
 
-        for target_width, target_height in self.preferred_camera_resolutions:
-            self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
-            self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
+        win32gui.EnumWindows(callback, None)
 
-            actual_width = int(self.video_capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-            actual_height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        print("\nAvailable Windows:\n")
+        for i, (hwnd, title) in enumerate(windows):
+            print(f"[{i}] {title}")
 
-            if actual_width >= target_width and actual_height >= target_height:
-                best_width = actual_width
-                best_height = actual_height
-                break
+        idx = int(input("\nSelect window number: "))
+        hwnd, title = windows[idx]
 
-            if (actual_width * actual_height) > (best_width * best_height):
-                best_width = actual_width
-                best_height = actual_height
+        print(f"\nCapturing: {title}")
 
-        self.video_x_res = best_width
-        self.video_y_res = best_height
-        logging.info(f"[Tree Builder] Camera resolution selected: {self.video_x_res}x{self.video_y_res}")
+        return hwnd
+
+    def grab_window_frame(self):
+        left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+        width = right - left
+        height = bottom - top
+
+        hwndDC = win32gui.GetWindowDC(self.hwnd)
+        mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+        saveDC = mfcDC.CreateCompatibleDC()
+
+        saveBitMap = win32ui.CreateBitmap()
+        saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
+
+        saveDC.SelectObject(saveBitMap)
+
+        result = ctypes.windll.user32.PrintWindow(
+            self.hwnd, saveDC.GetSafeHdc(), 3
+        )
+
+        bmpinfo = saveBitMap.GetInfo()
+        bmpstr = saveBitMap.GetBitmapBits(True)
+
+        img = np.frombuffer(bmpstr, dtype='uint8')
+        img.shape = (bmpinfo['bmHeight'], bmpinfo['bmWidth'], 4)
+
+        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+        win32gui.DeleteObject(saveBitMap.GetHandle())
+        saveDC.DeleteDC()
+        mfcDC.DeleteDC()
+        win32gui.ReleaseDC(self.hwnd, hwndDC)
+
+        return frame
+
     def __del__(self):
         # body of destructor
         if(self.video_on==True):
-            logging.info("[Tree Builder] Releasing camera capture")
+            logging.info("[Tree Builder] Releasing window capture resources")
             cv2.destroyAllWindows()
-            self.video_capture.release()
 
 
     def setButton(self,button1):
@@ -434,7 +440,7 @@ class GML_tree_builder():
                     if(self.tracking_result_debug==True):
                         if(tracking_phase>4000):
                             print(">>> phase too large")
-                        print("****    Found tracking id:",track_id," tracking_phase:",tracking_phase)
+                        print("Found tracking id:",track_id," tracking_phase:",tracking_phase)
             else:
                 #Find similar size circles
                 nearest=-1
@@ -459,10 +465,10 @@ class GML_tree_builder():
                         if(self.tracking_result_debug==True):
                             if(tracking_phase>4000):
                                 print(">>> phase too large")
-                                print("****    Recycling index:",nearest," tracking_phase:",tracking_phase)
+                                print("Recycling index:",nearest," tracking_phase:",tracking_phase)
                                 initial_tracking_list.pop(nearest)
                     else:
-                        print("****    Not near",nearest_dist)
+                        print("Not near",nearest_dist)
                         #gm1.advance_cursor(0.5)
                         gm1.set_freq(freq)
                         gm1.set_cursor(gm1.phase) #90 deg offset to start
@@ -470,7 +476,7 @@ class GML_tree_builder():
                         initial_tracking_list.pop(nearest)
                 else:
                     tracking_phase=initial_tracking_list[nearest][2]
-                    print("****    Not found:",tracking_phase)
+                    print("Not found:",tracking_phase)
                     gm1.set_freq(freq)
                     gm1.set_cursor(gm1.phase) #90 deg offset to start
                     gm1.set_probability(0.1)
@@ -522,7 +528,7 @@ class GML_tree_builder():
             tracking_list=self.rootNode.read_identifiers(100)
             #print("Final GML tracking list: ",tracking_list)
 
-        self.capture_from_camera()
+        self.capture_from_window()
         self.building_tree=False
         self.prev_root_phase=self.rootNode.cursor_phase
         if(self.show_opencv_with_circles):
@@ -567,22 +573,15 @@ class GML_tree_builder():
 
         self.tracking_all(len(self.circles))
 
-    # Capture a frame from video and apply feature detections
+    # Capture a frame from selected window and apply feature detections
 
-    def capture_from_camera(self,redraw_only=False):
+    def capture_from_window(self,redraw_only=False):
         if(self.video_on==False):
             return
         if(self.run_test_cases):
             self.video_test_cases()
             return
-
-        if(self.window_video_capture_handle is None):
-            ret,frame = self.video_capture.read()
-            print("***********Video read")
-        else:
-            im_frame=pyautogui.screenshot(region=self.window_video_capture_handle)
-            frame = np.asarray(im_frame)
-            print("***********Screenshot read")
+        frame = self.grab_window_frame()
 
         if (self.saved_photo == False):
             filename = "freq_data/frame_snapshot_" + time.strftime("%Y-%m-%d_%H-%M-%S") + ".png"
@@ -751,7 +750,7 @@ class GML_tree_builder():
                 print("cv2 exception")
 
 
-    # Load a video capture and draw to the kivy screen
+    # Load a captured frame and draw to the kivy screen
     def _video_fit_scale(self, frame_width, frame_height):
         available_width = max(1, Window.width - self.photo_pos[0] - 10)
         available_height = max(1, Window.height - self.photo_pos[1] - 10)
@@ -842,7 +841,7 @@ class GML_tree_builder():
             rand1=rand2=rand3=rand4=rand5=0
         centre_x=320
         centre_y=240
-        ret,frame = self.video_capture.read()
+        frame = self.grab_window_frame()
         self.img_key_points=frame
         #self.circle_lock.acquire()
         self.circles=[]

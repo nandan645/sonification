@@ -2,11 +2,9 @@
 # Standard Library
 # =========================
 import argparse
-import ctypes
 import logging
 from threading import Thread
 from time import sleep
-from ctypes import wintypes
 import os
 
 # =========================
@@ -332,7 +330,7 @@ class GMLSonificationApp(App):
                             "Dimensions: "+str(self.rootNode.dimensions()), 18)
         self.sonic.drawText(self.text1, self.button1.canvas, 210)
 
-        self.tree_builder.capture_from_camera()
+        self.tree_builder.capture_from_window()
 
         return self.button1
 
@@ -378,7 +376,6 @@ class GMLSonificationApp(App):
                         help="Path to the image")
         ap.add_argument("-s", "--size", required=False, help="size")
         ap.add_argument("-r", "--radius", required=False, help="radius")
-        ap.add_argument("-z", "--capture_window", required=False, help="capture_window")
         self.args = vars(ap.parse_args())
 
         if(self.args["image"] is not None):
@@ -407,21 +404,7 @@ class GMLSonificationApp(App):
             self.tree_builder.set_circle_detect_dimensions(10, 120)
             self.sonic.draw_mode = 6
             #Prime with video
-            self.tree_builder.capture_from_camera()
-
-        if (self.args["capture_window"] is not None):
-            window_name = str(self.args["capture_window"].strip('\"'))
-            print("Window",window_name)
-            self.tree_builder.window_video_capture=window_name
-            #gw.getAllTitles()
-            user32 = ctypes.windll.user32
-            handle = user32.FindWindowW(None, window_name)
-            rect = wintypes.RECT()
-            ff = ctypes.windll.user32.GetWindowRect(handle, ctypes.pointer(rect))
-            print(rect.left, rect.top, rect.right, rect.bottom)
-            print(ff)
-            self.tree_builder.window_video_capture_handle =[rect.left, rect.top, rect.right, rect.bottom]
-
+            self.tree_builder.capture_from_window()
 
         self.rootNode = self.tree_builder.build_tree(1000, True)
 
