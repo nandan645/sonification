@@ -1,16 +1,4 @@
-# -*- coding: utf-8 -*-
-# =============================================================================
-# Created By  : Martin Timms
-# Created Date: 17th June 2022
-# License: BSD-3-Clause License
-# Organisation: NanoBrain.org
-# Project: https://github.com/Electro-resonance/NanoBrain
-# Description: Speed up trigonometry using sine and cosine tables
-# =============================================================================
-
-#import numpy as np
 import math
-
 
 sin_array=[]
 cos_array=[]

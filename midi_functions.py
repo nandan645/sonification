@@ -1,4 +1,3 @@
-from ctypes.util import find_library
 from kivy.clock import Clock
 import time
 import logging

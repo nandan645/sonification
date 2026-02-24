@@ -1,14 +1,3 @@
-# -*- coding: utf-8 -*-
-# =============================================================================
-# Created By  : Martin Timms
-# Created Date: 24th February 2022
-# License: BSD-3-Clause License
-# Organisation: NanoBrain.org
-# Project: https://github.com/Electro-resonance/NanoBrain
-# Description: Sonification class for Geometric Music Language (GML)
-# =============================================================================
-
-
 from GML import *
 from gl_text_drawing import *
 from midi_functions import *

@@ -5,16 +5,10 @@ from GML_analysis import *
 import numpy as np
 import cv2
 import pyautogui
-
 import logging
 import sys
 import time
-import pygetwindow as gw
-
-from scipy.stats import rankdata
-
 from kivy.core.image import Image
-from kivy.uix.button import Button
 
 """
 Class used for creating GML trees from still images and from video frames

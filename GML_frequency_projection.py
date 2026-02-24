@@ -7,7 +7,6 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
-from mpl_toolkits import mplot3d
 import time
 import tzlocal
 import cv2
