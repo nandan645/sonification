@@ -1,1 +1,1 @@
-As of now this code works with python 3.9.1 and the libraries with specified versions in requirements_old.txt.
+As of now this code works with python 3.9.1 and the libraries with specified versions in requirements.txt.

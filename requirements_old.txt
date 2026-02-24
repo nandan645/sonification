@@ -1,8 +1,0 @@
-numpy==1.26.4
-Kivy==2.3.1
-matplotlib==3.9.4
-opencv-python==4.8.1.78
-PyAutoGUI==0.9.54
-pyttsx3==2.99
-scipy==1.13.1
-tzlocal==5.3.1
