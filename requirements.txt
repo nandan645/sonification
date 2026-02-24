@@ -5,3 +5,4 @@ opencv-python==4.8.1.78
 pyttsx3==2.99
 scipy==1.13.1
 tzlocal==5.3.1
+pywin32==311

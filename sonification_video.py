@@ -330,7 +330,7 @@ class GMLSonificationApp(App):
                             "Dimensions: "+str(self.rootNode.dimensions()), 18)
         self.sonic.drawText(self.text1, self.button1.canvas, 210)
 
-        self.tree_builder.capture_from_camera()
+        self.tree_builder.capture_from_window()
 
         return self.button1
 
@@ -404,7 +404,7 @@ class GMLSonificationApp(App):
             self.tree_builder.set_circle_detect_dimensions(10, 120)
             self.sonic.draw_mode = 6
             #Prime with video
-            self.tree_builder.capture_from_camera()
+            self.tree_builder.capture_from_window()
 
         self.rootNode = self.tree_builder.build_tree(1000, True)
 
