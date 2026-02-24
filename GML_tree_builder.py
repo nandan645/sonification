@@ -4,7 +4,6 @@ from GML import *
 from GML_analysis import *
 import numpy as np
 import cv2
-import pyautogui
 import logging
 import sys
 import time
@@ -36,7 +35,6 @@ class GML_tree_builder():
 
 
     video_capture=None
-    window_video_capture_handle =None
     img_key_points=None
     update_frame_count=0
 
@@ -104,11 +102,10 @@ class GML_tree_builder():
         self.video_on = video_on
         self.button1 = button1
 
-        if self.video_on == True and self.window_video_capture_handle is None:
-            logging.info("[Tree Builder] Enabling camera capture (MSMF + MJPG)")
+        if self.video_on == True:
+            logging.info("[Tree Builder] Enabling camera capture")
 
-            # Use MSMF backend (since DSHOW fails on your camera)
-            self.video_capture = cv2.VideoCapture(self.camera_device_number, cv2.CAP_MSMF)
+            self.video_capture = cv2.VideoCapture(self.camera_device_number)
 
             if not self.video_capture.isOpened():
                 logging.error("[Tree Builder] Camera failed to open")
@@ -434,7 +431,7 @@ class GML_tree_builder():
                     if(self.tracking_result_debug==True):
                         if(tracking_phase>4000):
                             print(">>> phase too large")
-                        print("****    Found tracking id:",track_id," tracking_phase:",tracking_phase)
+                        print("Found tracking id:",track_id," tracking_phase:",tracking_phase)
             else:
                 #Find similar size circles
                 nearest=-1
@@ -459,10 +456,10 @@ class GML_tree_builder():
                         if(self.tracking_result_debug==True):
                             if(tracking_phase>4000):
                                 print(">>> phase too large")
-                                print("****    Recycling index:",nearest," tracking_phase:",tracking_phase)
+                                print("Recycling index:",nearest," tracking_phase:",tracking_phase)
                                 initial_tracking_list.pop(nearest)
                     else:
-                        print("****    Not near",nearest_dist)
+                        print("Not near",nearest_dist)
                         #gm1.advance_cursor(0.5)
                         gm1.set_freq(freq)
                         gm1.set_cursor(gm1.phase) #90 deg offset to start
@@ -470,7 +467,7 @@ class GML_tree_builder():
                         initial_tracking_list.pop(nearest)
                 else:
                     tracking_phase=initial_tracking_list[nearest][2]
-                    print("****    Not found:",tracking_phase)
+                    print("Not found:",tracking_phase)
                     gm1.set_freq(freq)
                     gm1.set_cursor(gm1.phase) #90 deg offset to start
                     gm1.set_probability(0.1)
@@ -576,13 +573,8 @@ class GML_tree_builder():
             self.video_test_cases()
             return
 
-        if(self.window_video_capture_handle is None):
-            ret,frame = self.video_capture.read()
-            print("***********Video read")
-        else:
-            im_frame=pyautogui.screenshot(region=self.window_video_capture_handle)
-            frame = np.asarray(im_frame)
-            print("***********Screenshot read")
+        ret,frame = self.video_capture.read()
+        # print("Video read")
 
         if (self.saved_photo == False):
             filename = "freq_data/frame_snapshot_" + time.strftime("%Y-%m-%d_%H-%M-%S") + ".png"
