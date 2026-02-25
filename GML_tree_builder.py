@@ -8,7 +8,6 @@ import logging
 import sys
 import time
 from kivy.core.image import Image
-from kivy.core.window import Window
 import ctypes
 import win32gui
 import win32ui
@@ -55,6 +54,11 @@ class GML_tree_builder():
     frame_update_rate=1
     video_underlay_update_rate=0 #increase for slower update rate of image under GML
     show_opencv_Window=False
+    video_display_margin=10
+    video_source="window"
+    camera_index=0
+    camera_capture=None
+    hwnd=None
 
 
     feature_filter_rate=4
@@ -94,20 +98,80 @@ class GML_tree_builder():
     saved_photo=False
 
 
-    def __init__(self, video_on, button1):
+    def __init__(self, video_on, button1, video_source="window", camera_index=0, selected_hwnd=None):
         super(GML_tree_builder, self).__init__()
 
         self.video_on = video_on
         self.button1 = button1
+        self.video_source = str(video_source).lower()
+        self.camera_index = int(camera_index)
         if self.video_on:
-            logging.info("[Tree Builder] Window capture mode enabled")
+            if self.video_source == "camera":
+                logging.info(f"[Tree Builder] Camera capture mode enabled (index={self.camera_index})")
+                self.init_camera_capture()
+            else:
+                self.video_source = "window"
+                logging.info("[Tree Builder] Window capture mode enabled")
 
-            ctypes.windll.user32.SetProcessDPIAware()
-            self.hwnd = self.select_window_interactively()
+                ctypes.windll.user32.SetProcessDPIAware()
+                if selected_hwnd is not None:
+                    self.hwnd = selected_hwnd
+                else:
+                    selected_hwnd = self.select_window_interactively()
+                if selected_hwnd is None:
+                    self.video_source = "camera"
+                    logging.info(f"[Tree Builder] Camera capture selected (index={self.camera_index})")
+                    self.init_camera_capture()
+                else:
+                    self.hwnd = selected_hwnd
 
             self.display_ratio_lists = False
 
+    def init_camera_capture(self):
+        capture = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        if not capture.isOpened():
+            capture.release()
+            capture = cv2.VideoCapture(self.camera_index)
+
+        if not capture.isOpened():
+            logging.error(f"[Tree Builder] Unable to open camera index {self.camera_index}")
+            self.camera_capture = None
+            return False
+
+        self.camera_capture = capture
+        return True
+
     def select_window_interactively(self):
+        windows = self.list_visible_windows()
+
+        if len(windows) == 0:
+            print("\nNo capturable windows found. Falling back to camera.")
+            self.camera_index = self.prompt_camera_index()
+            print(f"\nCapturing: Camera {self.camera_index}")
+            return None
+
+        print("\nAvailable Windows:\n")
+        for i, (hwnd, title) in enumerate(windows):
+            print(f"[{i}] {title}")
+        print("[c] Camera feed")
+
+        while True:
+            selection = input("\nSelect window number or 'c' for camera: ").strip().lower()
+            if selection == "c":
+                self.camera_index = self.prompt_camera_index()
+                print(f"\nCapturing: Camera {self.camera_index}")
+                return None
+
+            try:
+                idx = int(selection)
+                hwnd, title = windows[idx]
+                print(f"\nCapturing: {title}")
+                return hwnd
+            except (ValueError, IndexError):
+                print("Invalid selection, try again.")
+
+    @staticmethod
+    def list_visible_windows():
         windows = []
 
         def callback(hwnd, _):
@@ -117,17 +181,56 @@ class GML_tree_builder():
                     windows.append((hwnd, title))
 
         win32gui.EnumWindows(callback, None)
+        return windows
+
+    @staticmethod
+    def prompt_camera_index():
+        cam_input = input("Camera index (default 0): ").strip()
+        if cam_input:
+            try:
+                return int(cam_input)
+            except ValueError:
+                print("Invalid camera index, using 0")
+        return 0
+
+    @staticmethod
+    def prompt_video_selection():
+        windows = GML_tree_builder.list_visible_windows()
+        if len(windows) == 0:
+            camera_index = GML_tree_builder.prompt_camera_index()
+            return {
+                "video_source": "camera",
+                "camera_index": camera_index,
+                "selected_hwnd": None,
+            }
 
         print("\nAvailable Windows:\n")
         for i, (hwnd, title) in enumerate(windows):
             print(f"[{i}] {title}")
+        print("[c] Camera feed")
 
-        idx = int(input("\nSelect window number: "))
-        hwnd, title = windows[idx]
+        while True:
+            selection = input("\nSelect window number or 'c' for camera: ").strip().lower()
+            if selection == "c":
+                camera_index = GML_tree_builder.prompt_camera_index()
+                print(f"\nSelected: Camera {camera_index}")
+                return {
+                    "video_source": "camera",
+                    "camera_index": camera_index,
+                    "selected_hwnd": None,
+                }
 
-        print(f"\nCapturing: {title}")
-
-        return hwnd
+            try:
+                idx = int(selection)
+                hwnd, title = windows[idx]
+                print(f"\nSelected: {title}")
+                return {
+                    "video_source": "window",
+                    "camera_index": 0,
+                    "selected_hwnd": hwnd,
+                }
+            except (ValueError, IndexError):
+                print("Invalid selection, try again.")
 
     def grab_window_frame(self):
         left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
@@ -162,10 +265,29 @@ class GML_tree_builder():
 
         return frame
 
+    def grab_camera_frame(self):
+        if self.camera_capture is None:
+            if not self.init_camera_capture():
+                return None
+
+        ok, frame = self.camera_capture.read()
+        if not ok:
+            logging.warning("[Tree Builder] Camera frame read failed")
+            return None
+        return frame
+
+    def grab_video_frame(self):
+        if self.video_source == "camera":
+            return self.grab_camera_frame()
+        return self.grab_window_frame()
+
     def __del__(self):
         # body of destructor
         if(self.video_on==True):
-            logging.info("[Tree Builder] Releasing window capture resources")
+            logging.info("[Tree Builder] Releasing video capture resources")
+            if self.camera_capture is not None:
+                self.camera_capture.release()
+                self.camera_capture = None
             cv2.destroyAllWindows()
 
 
@@ -581,7 +703,7 @@ class GML_tree_builder():
         if(self.run_test_cases):
             self.video_test_cases()
             return
-        frame = self.grab_window_frame()
+        frame = self.grab_video_frame()
 
         if (self.saved_photo == False):
             filename = "freq_data/frame_snapshot_" + time.strftime("%Y-%m-%d_%H-%M-%S") + ".png"
@@ -752,8 +874,9 @@ class GML_tree_builder():
 
     # Load a captured frame and draw to the kivy screen
     def _video_fit_scale(self, frame_width, frame_height):
-        available_width = max(1, Window.width - self.photo_pos[0] - 10)
-        available_height = max(1, Window.height - self.photo_pos[1] - 10)
+        from kivy.core.window import Window
+        available_width = max(1, Window.width - (self.video_display_margin * 2))
+        available_height = max(1, Window.height - (self.video_display_margin * 2))
 
         scale_x = frame_width / available_width
         scale_y = frame_height / available_height
@@ -762,8 +885,7 @@ class GML_tree_builder():
         if fit_scale <= 0:
             fit_scale = 1.0
 
-        # Keep user scale if it already makes image smaller than fit target.
-        return max(self.image_scale_video, fit_scale)
+        return fit_scale
 
     def draw_video(self):
         if(self.img_key_points is None):
@@ -788,6 +910,13 @@ class GML_tree_builder():
 
         #Following creates the base layer for the GML overlay
         self.photo_dims=[self.img_key_points.shape[1],self.img_key_points.shape[0]]
+        from kivy.core.window import Window
+        display_width = self.photo_dims[0] / self.image_scale
+        display_height = self.photo_dims[1] / self.image_scale
+        self.photo_pos = [
+            max(self.video_display_margin, (Window.width - display_width) / 2),
+            max(self.video_display_margin, (Window.height - display_height) / 2)
+        ]
         with self.button1.canvas:
             Color(1, 1, 1)
             Rectangle(pos=self.photo_pos,size=[self.photo_dims[0]/self.image_scale, self.photo_dims[1]/self.image_scale], texture=self.texture1)
@@ -841,7 +970,7 @@ class GML_tree_builder():
             rand1=rand2=rand3=rand4=rand5=0
         centre_x=320
         centre_y=240
-        frame = self.grab_window_frame()
+        frame = self.grab_video_frame()
         self.img_key_points=frame
         #self.circle_lock.acquire()
         self.circles=[]

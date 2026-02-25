@@ -1,11 +1,98 @@
 # =========================
 # Standard Library
 # =========================
-import argparse
 import logging
 from threading import Thread
 from time import sleep
 import os
+import sys
+import subprocess
+
+
+def _list_visible_windows_cli():
+    import win32gui
+
+    windows = []
+
+    def callback(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if title and title.strip():
+                windows.append((hwnd, title))
+
+    win32gui.EnumWindows(callback, None)
+    return windows
+
+
+def _prompt_capture_config_cli():
+    windows = _list_visible_windows_cli()
+
+    if len(windows) == 0:
+        cam_input = input("No windows found. Camera index (default 0): ").strip()
+        try:
+            camera_index = int(cam_input) if cam_input else 0
+        except ValueError:
+            camera_index = 0
+        return {"video_source": "camera", "camera_index": camera_index, "selected_hwnd": None}
+
+    print("\nAvailable Windows:\n")
+    for i, (hwnd, title) in enumerate(windows):
+        print(f"[{i}] {title}")
+    print("[c] Camera feed")
+
+    while True:
+        selection = input("\nSelect window number or 'c' for camera: ").strip().lower()
+        if selection == "c":
+            cam_input = input("Camera index (default 0): ").strip()
+            try:
+                camera_index = int(cam_input) if cam_input else 0
+            except ValueError:
+                print("Invalid camera index, using 0")
+                camera_index = 0
+            return {"video_source": "camera", "camera_index": camera_index, "selected_hwnd": None}
+
+        try:
+            idx = int(selection)
+            hwnd, title = windows[idx]
+            print(f"\nSelected: {title}")
+            return {"video_source": "window", "camera_index": 0, "selected_hwnd": hwnd}
+        except (ValueError, IndexError):
+            print("Invalid selection, try again.")
+
+
+def _capture_config_from_env():
+    source = os.environ.get("SONI_VIDEO_SOURCE", "window")
+    cam_raw = os.environ.get("SONI_CAMERA_INDEX", "0")
+    hwnd_raw = os.environ.get("SONI_SELECTED_HWND", "")
+
+    try:
+        camera_index = int(cam_raw)
+    except ValueError:
+        camera_index = 0
+
+    selected_hwnd = None
+    if hwnd_raw not in ("", "None", None):
+        try:
+            selected_hwnd = int(hwnd_raw)
+        except ValueError:
+            selected_hwnd = None
+
+    return {
+        "video_source": source,
+        "camera_index": camera_index,
+        "selected_hwnd": selected_hwnd,
+    }
+
+
+if __name__ == '__main__' and os.environ.get("SONI_CAPTURE_READY") != "1":
+    capture_config = _prompt_capture_config_cli()
+    child_env = os.environ.copy()
+    child_env["SONI_CAPTURE_READY"] = "1"
+    child_env["SONI_VIDEO_SOURCE"] = capture_config["video_source"]
+    child_env["SONI_CAMERA_INDEX"] = str(capture_config["camera_index"])
+    child_env["SONI_SELECTED_HWND"] = str(capture_config["selected_hwnd"])
+    result = subprocess.run([sys.executable, __file__], env=child_env)
+    sys.exit(result.returncode)
 
 # =========================
 # Third-Party Libraries
@@ -13,7 +100,6 @@ import os
 import cv2
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.core.window import Window
 from kivy.graphics import *
 from kivy.uix.button import Button
 
@@ -73,15 +159,20 @@ class GMLSonificationApp(App):
     plot_thread=None
     playing_sounds = False
     plotting_points = False
+    capture_config = None
+    kivy_window = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, capture_config=None, **kwargs):
         super(GMLSonificationApp, self).__init__(**kwargs)
-        self._keyboard = Window.request_keyboard(self._keyboard_closed, None)
+        self.capture_config = capture_config or {}
+        from kivy.core.window import Window
+        self.kivy_window = Window
+        self._keyboard = self.kivy_window.request_keyboard(self._keyboard_closed, None)
         self._keyboard.bind(on_key_down=self._on_keyboard_down)
-        Window.bind(on_resize=self.on_window_resize)
-        blit_functions_init(Window)
+        self.kivy_window.bind(on_resize=self.on_window_resize)
+        blit_functions_init(self.kivy_window)
         GML_init()
-        self.fbo = Fbo(size=Window.size, with_stencilbuffer=True)
+        self.fbo = Fbo(size=self.kivy_window.size, with_stencilbuffer=True)
         self.tree_builder = GML_tree_builder(False, self.button1)
         if(self.tree_builder.video_on == True):
             self.photo_on = False  # not self.photo_on
@@ -197,7 +288,7 @@ class GMLSonificationApp(App):
 
     def on_window_resize(self, window, width, height):
         logging.info("[App Window  ] width="+str(width)+" height="+str(height))
-        blit_functions_init(Window)
+        blit_functions_init(window)
         GML_resize()
         self.redraw = True
 
@@ -370,41 +461,26 @@ class GMLSonificationApp(App):
 
         self.sonic.all_midi_notes_off()
         self.sonic.set_music_scale(self.music_scale)
-        # construct the argument parser and parse the arguments
-        ap = argparse.ArgumentParser()
-        ap.add_argument("-i", "--image", required=False,
-                        help="Path to the image")
-        ap.add_argument("-s", "--size", required=False, help="size")
-        ap.add_argument("-r", "--radius", required=False, help="radius")
-        self.args = vars(ap.parse_args())
+        self.args = {"image": None}
 
-        if(self.args["image"] is not None):
-            # load the image, clone it for output, and then convert it to grayscale
-            image = cv2.imread(self.args["image"])
-            #scale= image.shape[1]/(screen_width-40)
-            scale = 1
-            dim = (int(image.shape[1]/scale), int(image.shape[0]/scale))
-            print(str(int(scale))+" "+str(dim))
-
-            output = image.copy()
-
-            size = float(self.args["size"])
-            rad = float(self.args["radius"])
-
-            self.tree_builder.video_on = False
-            self.tree_builder.set_circle_detect_dimensions(size, rad)
-            self.tree_builder.add_circlular_features(image, dim, size, rad)
-            self.tree_builder.draw_photo(self.args["image"])
-        else:
-            print("Video mode")
-            self.tree_builder = GML_tree_builder(True, self.button1)
-            self.tree_builder.video_on = True
-            print("Running invariant detector")
-            self.invariant_detector = GML_invariant_detector()
-            self.tree_builder.set_circle_detect_dimensions(10, 120)
-            self.sonic.draw_mode = 6
-            #Prime with video
-            self.tree_builder.capture_from_window()
+        print("Video mode")
+        source = self.capture_config.get("video_source", "window")
+        camera_index = self.capture_config.get("camera_index", 0)
+        selected_hwnd = self.capture_config.get("selected_hwnd", None)
+        self.tree_builder = GML_tree_builder(
+            True,
+            self.button1,
+            video_source=source,
+            camera_index=camera_index,
+            selected_hwnd=selected_hwnd,
+        )
+        self.tree_builder.video_on = True
+        print("Running invariant detector")
+        self.invariant_detector = GML_invariant_detector()
+        self.tree_builder.set_circle_detect_dimensions(10, 120)
+        self.sonic.draw_mode = 6
+        #Prime with video
+        self.tree_builder.capture_from_window()
 
         self.rootNode = self.tree_builder.build_tree(1000, True)
 
@@ -429,6 +505,10 @@ class GMLSonificationApp(App):
 class OpenGMLSonificationApp(App):
     app = None
 
+    def __init__(self, capture_config=None, **kwargs):
+        super(OpenGMLSonificationApp, self).__init__(**kwargs)
+        self.capture_config = capture_config or {}
+
     def on_stop(self):
         if self.app is not None:
             self.app.run_on = False
@@ -451,13 +531,14 @@ class OpenGMLSonificationApp(App):
         Sonic_GML_init()
 
         # App creation
-        self.app = GMLSonificationApp()
+        self.app = GMLSonificationApp(capture_config=self.capture_config)
         Clock.schedule_interval(self.app.update, 0.005 / 60.0)
 
         return self.app.update(0.0)
 
 if __name__ == '__main__':
     os.makedirs("freq_data", exist_ok=True)
-    OpenGMLSonificationApp().run()
+    capture_config = _capture_config_from_env()
+    OpenGMLSonificationApp(capture_config=capture_config).run()
     Sonic_GML_quit()
 exit()
